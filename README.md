@@ -16,7 +16,7 @@ $ python anagrammer.py "Software engineering"
 10. Son Tine Agger Wine-Fre
 ```
 
-Every output is a **perfect anagram** of the input -- all letters used exactly once, none added.
+Every output is a perfect anagram of the input -- all letters used exactly once, ignoring punctuation (hyphens and apostrophes).
 
 ## How It Works
 
