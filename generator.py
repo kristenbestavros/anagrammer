@@ -65,19 +65,20 @@ BLOCKED_WORDS = frozenset(
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 CACHE_DIR = os.path.join(DATA_DIR, ".cache")
 
+_MALE_FIRST = os.path.join(DATA_DIR, "male_first.txt")
+_FEMALE_FIRST = os.path.join(DATA_DIR, "female_first.txt")
+_SURNAMES = os.path.join(DATA_DIR, "surnames.txt")
+
 DATASET_FILES = {
-    "real": [
-        os.path.join(DATA_DIR, "real_first.txt"),
-        os.path.join(DATA_DIR, "real_last.txt"),
-    ],
-    "fantasy": [
-        os.path.join(DATA_DIR, "fantasy_names.txt"),
-    ],
+    "both": [_MALE_FIRST, _FEMALE_FIRST, _SURNAMES],
+    "male": [_MALE_FIRST, _SURNAMES],
+    "female": [_FEMALE_FIRST, _SURNAMES],
 }
 
 CACHE_FILES = {
-    "real": os.path.join(CACHE_DIR, "real_model.pkl"),
-    "fantasy": os.path.join(CACHE_DIR, "fantasy_model.pkl"),
+    "both": os.path.join(CACHE_DIR, "both_model.pkl"),
+    "male": os.path.join(CACHE_DIR, "male_model.pkl"),
+    "female": os.path.join(CACHE_DIR, "female_model.pkl"),
 }
 
 
@@ -160,17 +161,19 @@ def _max_segment_overlap(candidate_segs, selected_list):
 class AnagramGenerator:
     """Main generator that produces name-like anagrams from input phrases."""
 
-    def __init__(self, dataset="real", no_cache=False):
+    def __init__(self, dataset="both", no_cache=False):
         """Initialize and load/train the Markov model.
 
         Args:
-            dataset: 'real' or 'fantasy'
+            dataset: 'both', 'male', or 'female'
             no_cache: if True, force model rebuild
         """
         self.dataset = dataset
 
         if dataset not in DATASET_FILES:
-            raise ValueError(f"Unknown dataset: {dataset}. Use 'real' or 'fantasy'.")
+            raise ValueError(
+                f"Unknown dataset: {dataset}. Use 'both', 'male', or 'female'."
+            )
 
         data_files = DATASET_FILES[dataset]
         missing = [f for f in data_files if not os.path.exists(f)]

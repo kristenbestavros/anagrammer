@@ -3,7 +3,7 @@
 
 Usage:
     python anagrammer.py "Whistleblower"
-    python anagrammer.py "Pride goes before the fall" --dataset fantasy -n 8
+    python anagrammer.py "Pride goes before the fall" --dataset female -n 8
     python anagrammer.py "Split Loyalty" --seed 42 --verbose
 """
 
@@ -34,9 +34,9 @@ def parse_args():
     parser.add_argument(
         "-d",
         "--dataset",
-        choices=["real", "fantasy"],
-        default="real",
-        help="Training dataset: 'real' for census names, 'fantasy' for fictional names",
+        choices=["both", "male", "female"],
+        default="both",
+        help="Training dataset: 'both' (all), 'male', or 'female'",
     )
     parser.add_argument(
         "--seed",

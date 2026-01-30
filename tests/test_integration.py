@@ -27,14 +27,14 @@ class TestEndToEnd:
 
     def test_generates_results(self):
         random.seed(42)
-        gen = AnagramGenerator(dataset="real")
+        gen = AnagramGenerator(dataset="both")
         results = gen.generate("William Shakespeare", n_results=5)
         assert len(results) > 0
 
     def test_all_results_are_perfect_anagrams(self):
         """The core invariant: every result uses exactly the input letters."""
         random.seed(42)
-        gen = AnagramGenerator(dataset="real")
+        gen = AnagramGenerator(dataset="both")
         phrase = "Hello World"
         results = gen.generate(phrase, n_results=5)
         normalized_input = normalize(phrase)
@@ -48,7 +48,7 @@ class TestEndToEnd:
 
     def test_results_have_expected_shape(self):
         random.seed(42)
-        gen = AnagramGenerator(dataset="real")
+        gen = AnagramGenerator(dataset="both")
         results = gen.generate("Testing", n_results=3)
         for name, score, label, segments in results:
             assert isinstance(name, str)
@@ -57,12 +57,12 @@ class TestEndToEnd:
             assert isinstance(segments, list)
 
     def test_short_input_returns_empty(self):
-        gen = AnagramGenerator(dataset="real")
+        gen = AnagramGenerator(dataset="both")
         results = gen.generate("ab", n_results=5)
         assert results == []
 
     def test_seed_reproducibility(self):
-        gen = AnagramGenerator(dataset="real")
+        gen = AnagramGenerator(dataset="both")
         random.seed(42)
         r1 = gen.generate("Reproducible", n_results=5)
         random.seed(42)
@@ -71,12 +71,21 @@ class TestEndToEnd:
         names2 = [name for name, *_ in r2]
         assert names1 == names2
 
-    def test_fantasy_dataset(self):
+    def test_female_dataset(self):
         random.seed(42)
-        gen = AnagramGenerator(dataset="fantasy")
+        gen = AnagramGenerator(dataset="female")
         results = gen.generate("Dragon Fire", n_results=3)
         assert len(results) > 0
-        # Verify anagram property for fantasy too
+        # Verify anagram property for female dataset too
+        input_bag = LetterBag(normalize("Dragon Fire"))
+        for name, _score, _label, _segments in results:
+            assert LetterBag(name) == input_bag
+
+    def test_male_dataset(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="male")
+        results = gen.generate("Dragon Fire", n_results=3)
+        assert len(results) > 0
         input_bag = LetterBag(normalize("Dragon Fire"))
         for name, _score, _label, _segments in results:
             assert LetterBag(name) == input_bag
