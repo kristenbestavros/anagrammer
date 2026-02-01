@@ -3,17 +3,17 @@
 A command-line tool that generates name-like anagrams from words and phrases. Given any input text, it rearranges **every letter** into fictional character names that sound plausible and pronounceable.
 
 ```
-$ python anagrammer.py "Software engineering"
- 1. Gwenere Astion Finger
- 2. Fingere Wenne Gorista
- 3. Witane Ginger Fersone
- 4. Fereson Genia Wingert
- 5. Fria Winger Genes-Tone
- 6. Grene Forise Ante-Wing
- 7. Fing Trose Wina-Gerene
- 8. Ster Gorine Finge-Wena
- 9. Wines Tan Fer Gione-Ger
-10. Son Tine Agger Wine-Fre
+$ python anagrammer.py "Perfect Anagram"
+  1. Paterce Farmang
+  2. Martefer Capang
+  3. Catagan Fremper
+  4. Fergert Pacaman
+  5. Macapart Fergen
+  6. Tagance Framper
+  7. Patra Frece Mang
+  8. Frata Preng Mace
+  9. Macate Frang Per
+ 10. Marta F. Pergance
 ```
 
 Every output is a perfect anagram of the input -- all letters used exactly once, ignoring punctuation (hyphens and apostrophes).
@@ -65,6 +65,10 @@ python anagrammer.py "phrase to anagram"
 |------|---------|-------------|
 | `-n`, `--count` | 15 | Number of results to show |
 | `-d`, `--dataset` | `both` | Training data: `both`, `male`, or `female` |
+| `-t`, `--template` | auto | Use a specific name template (e.g., `"First Last"`) |
+| `--first` | none | Lock in a specific first name |
+| `--last` | none | Lock in a last name (`"Name"`, `"First-Second"`, or `"-Second"`) |
+| `--list-templates` | off | List all available templates and exit |
 | `--seed` | random | Random seed for reproducible output |
 | `--verbose` | off | Show scores, templates, and anagram verification |
 | `--no-cache` | off | Force Markov model rebuild (ignore cached model) |
@@ -90,33 +94,33 @@ $ python anagrammer.py "Whistleblower"
 Masculine-leaning names:
 
 ```
-$ python anagrammer.py "Artificial Intelligence" --dataset male
- 1. Finiell Cate Rectin-Gilia
- 2. Aletti Caric Ellin-Gifine
- 3. Ellecti Catin Feri-Gilina
- 4. Ferian Gilit Catie-Nicell
- 5. Aricti Gill Elin Tane-Fice
- 6. Catic Lin Ferta Gilie-Line
- 7. Fine Tinie Tric Calle-Gila
- 8. Ecti Lectin Gili Alian-Fer
- 9. Fricate T. Gilinic-Alleine
-10. Cating F. Lielieli-Terican
+$ python anagrammer.py "A stitch in time saves nine" --dataset male
+ 1. Tives Istin Manian-Cheste
+ 2. Sian Vichet Sentis-Matine
+ 3. Chiste Sinian Ment-Tavies
+ 4. Stene Avinis Chies-Mattin
+ 5. Chie Stan Istan Viste-Mine
+ 6. Vin Siesti Cati Man-Hentes
+ 7. Stian Vine Tes Mach-Stinie
+ 8. Chian Tin Stes Ine-Matives
+ 9. Machan V. Tinistei-Sineste
+10. Vassene T. Istichi-Mantine
 ```
 
 Feminine-leaning names:
 
 ```
-$ python anagrammer.py "Artificial Intelligence" --dataset female
- 1. Fina Crice Ellita-Gilinet
- 2. Tingita Celli Frice-Elina
- 3. Catlit Ellin Gericia-Fine
- 4. Fing Trice Ellane-Aliciti
- 5. Ficia Gent Allin Lice-Trie
- 6. Ficie Tri Ling Clate-Aline
- 7. Linet Catin Fra Elice-Gili
- 8. Tincia Lin Fecte Ria-Gille
- 9. Gillin F. Eicelina-Caritte
-10. Giline I. Flettena-Caricil
+$ python anagrammer.py "A stitch in time saves nine" --dataset female
+ 1. Chania Senti Mine-Vissett
+ 2. Evinett Macha Istins-Sine
+ 3. Mettes Isine Shan-Vicitan
+ 4. Cessian Ishett Man-Tivine
+ 5. Vines Sett Chine Tia-Manis
+ 6. Shent Matins Sia Vice-Tine
+ 7. Stes Ine Chitan Matis-Vine
+ 8. Shin Catte Evine Sina-Mist
+ 9. Macian N. Shettine-Tivisse
+10. Minette V. Nishana-Scistie
 ```
 
 Fewer results with verbose scoring:
@@ -130,6 +134,52 @@ Input: "Split Loyalty" (12 letters: ailllopsttyy)
   3. Patty Loy Sill                 [score:    -7.8] [First Middle Last] [OK]
   4. Yott Silly Pal                 [score:    -7.8] [First Middle Last] [OK]
   5. Aly Pott Silly                 [score:    -7.9] [First Middle Last] [OK]
+```
+
+Choosing a specific template:
+
+```
+$ python anagrammer.py "Burning the midnight oil" --template "First Middle Last" -n 5
+ 1. Buingil Thimon Derthing
+ 2. Durgini Lingen Tombhith
+ 3. Mithing Hilbur Tondeing
+ 4. Hometti Linigh Bringund
+ 5. Minthil Rundie Boghting
+```
+
+Locking in a first name:
+
+```
+$ python anagrammer.py "pride goes before the fall" --first Rigel -n 5
+ 1. Rigel Pathed Beres-Foleof
+ 2. Rigel Presta Hoffe-Bodele
+ 3. Rigel Sha Pedelo Toffe-Ber
+ 4. Rigel Bera Des Thoff-Polee
+ 5. Rigel O. Bereshel-Patoffed
+```
+
+Locking in a hyphenated last name:
+
+```
+$ python anagrammer.py "every cloud has a silver lining" --last "Verily-Songs" -n 5
+ 1. Diver Lucha Elian Verily-Songs
+ 2. Hulin Calia Dever Verily-Songs
+ 3. Helver Alin Ducia Verily-Songs
+ 4. Lavin Alie Ducher Verily-Songs
+ 5. Cheli Lavan Durie Verily-Songs
+```
+
+Listing available templates:
+
+```
+$ python anagrammer.py --list-templates
+Available templates:
+
+  Mononym                         (3-10 letters)
+  I. Last                         (3-6 letters)
+  First Last                      (6-17 letters)
+  First M. Last                   (7-16 letters)
+  ...
 ```
 
 Reproducible output:

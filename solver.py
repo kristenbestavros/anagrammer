@@ -95,7 +95,7 @@ def build_segment(
     return None
 
 
-def distribute_remaining(segments, remaining_bag, specs, model):
+def distribute_remaining(segments, remaining_bag, specs, model, frozen_indices=None):
     """Try to insert remaining letters into existing segments.
 
     Args:
@@ -103,15 +103,19 @@ def distribute_remaining(segments, remaining_bag, specs, model):
         remaining_bag: LetterBag of unused letters
         specs: list of SegmentSpec objects
         model: trained MarkovModel
+        frozen_indices: optional set of segment indices to skip (user-specified)
 
     Returns:
         True if all remaining letters were distributed, False otherwise.
     """
+    frozen = frozen_indices or set()
     for char in list(remaining_bag.as_sorted_string()):
         best_delta = -float("inf")
         best_insertion = None
 
         for seg_idx, segment in enumerate(segments):
+            if seg_idx in frozen:
+                continue
             spec = specs[seg_idx]
             if len(segment) >= spec.max_len:
                 continue
@@ -138,7 +142,9 @@ def distribute_remaining(segments, remaining_bag, specs, model):
     return True
 
 
-def generate_candidate(letter_bag, template, model, temperature=1.2):
+def generate_candidate(
+    letter_bag, template, model, temperature=1.2, fixed_segments=None
+):
     """Generate a single candidate name from a letter bag and template.
 
     Args:
@@ -146,18 +152,27 @@ def generate_candidate(letter_bag, template, model, temperature=1.2):
         template: NameTemplate specifying segment structure
         model: trained MarkovModel
         temperature: sampling temperature (higher = more diverse)
+        fixed_segments: optional dict mapping segment index to a fixed string
 
     Returns:
         List of segment strings, or None if generation failed.
     """
+    fixed = fixed_segments or {}
     remaining = letter_bag.copy()
     specs = template.segments
     n_segments = len(specs)
     segments = [None] * n_segments
 
-    # Randomize build order for diversity
-    order = list(range(n_segments))
+    # Pre-place fixed segments and subtract their letters
+    for idx, seg_text in fixed.items():
+        segments[idx] = seg_text
+        remaining.subtract(seg_text)
+
+    # Build order: only non-fixed segments, randomized for diversity
+    order = [i for i in range(n_segments) if i not in fixed]
     random.shuffle(order)
+
+    n_to_build = len(order)
 
     # Calculate how many letters we need to reserve for remaining segments
     for step, idx in enumerate(order):
@@ -165,7 +180,7 @@ def generate_candidate(letter_bag, template, model, temperature=1.2):
 
         # Calculate letters needed for segments not yet built
         letters_needed_later = 0
-        for future_step in range(step + 1, n_segments):
+        for future_step in range(step + 1, n_to_build):
             future_idx = order[future_step]
             letters_needed_later += specs[future_idx].min_len
 
@@ -180,7 +195,7 @@ def generate_candidate(letter_bag, template, model, temperature=1.2):
 
         # For the last segment in build order, it must use exactly
         # the remaining letters (within its length constraints)
-        if step == n_segments - 1:
+        if step == n_to_build - 1:
             needed = remaining.total()
             if needed < effective_min or needed > spec.max_len:
                 return None
@@ -198,21 +213,23 @@ def generate_candidate(letter_bag, template, model, temperature=1.2):
 
     # If letters remain (shouldn't happen with the last-segment logic above,
     # but handle edge cases), try to distribute them
+    frozen = set(fixed.keys())
     if not remaining.is_empty() and not distribute_remaining(
-        segments, remaining, specs, model
+        segments, remaining, specs, model, frozen_indices=frozen
     ):
         return None
 
     return segments
 
 
-def refine_candidate(segments, model, n_iterations=200):
+def refine_candidate(segments, model, n_iterations=200, frozen_indices=None):
     """Hill-climbing refinement: swap letters between segments to improve score.
 
     Args:
         segments: list of segment strings
         model: trained MarkovModel
         n_iterations: number of swap attempts
+        frozen_indices: optional set of segment indices to never modify
 
     Returns:
         Refined list of segment strings.
@@ -224,8 +241,11 @@ def refine_candidate(segments, model, n_iterations=200):
     best_segments = list(segments)
     current = list(segments)
 
-    # Only consider segments longer than 1 (skip initials)
-    swappable = [i for i in range(len(current)) if len(current[i]) > 1]
+    # Only consider segments longer than 1 (skip initials) and not frozen
+    frozen = frozen_indices or set()
+    swappable = [
+        i for i in range(len(current)) if len(current[i]) > 1 and i not in frozen
+    ]
     if len(swappable) < 2:
         return segments
 
@@ -266,7 +286,7 @@ TEMP_MIN = 1.2
 TEMP_MAX = 2.0
 
 
-def solve(letter_bag, template, model, n_attempts=500):
+def solve(letter_bag, template, model, n_attempts=500, fixed_segments=None):
     """Generate multiple candidate names for a given template.
 
     Args:
@@ -274,10 +294,12 @@ def solve(letter_bag, template, model, n_attempts=500):
         template: NameTemplate specifying structure
         model: trained MarkovModel
         n_attempts: number of generation attempts
+        fixed_segments: optional dict mapping segment index to a fixed string
 
     Returns:
         List of (segments, score) tuples, sorted by score descending.
     """
+    frozen = set(fixed_segments.keys()) if fixed_segments else set()
     results = []
     seen = set()
 
@@ -285,11 +307,13 @@ def solve(letter_bag, template, model, n_attempts=500):
         # Escalate temperature to encourage diversity in later attempts
         progress = attempt_idx / max(n_attempts - 1, 1)
         temperature = TEMP_MIN + (TEMP_MAX - TEMP_MIN) * progress
-        candidate = generate_candidate(letter_bag, template, model, temperature)
+        candidate = generate_candidate(
+            letter_bag, template, model, temperature, fixed_segments
+        )
         if candidate is None:
             continue
 
-        refined = refine_candidate(candidate, model)
+        refined = refine_candidate(candidate, model, frozen_indices=frozen)
         key = tuple(refined)
         if key in seen:
             continue

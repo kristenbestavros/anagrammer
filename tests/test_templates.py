@@ -1,10 +1,13 @@
 """Tests for templates.py - name structure templates."""
 
 from templates import (
+    TEMPLATES,
     NameTemplate,
     SegmentRole,
     SegmentSpec,
     format_name,
+    get_template_by_label,
+    list_templates,
     select_templates,
 )
 
@@ -54,6 +57,51 @@ class TestSelectTemplates:
     def test_max_five_templates(self):
         templates = select_templates(12)
         assert len(templates) <= 5
+
+    def test_required_roles_filters(self):
+        templates = select_templates(10, required_roles={SegmentRole.FIRST})
+        for t in templates:
+            roles = {s.role for s in t.segments}
+            assert SegmentRole.FIRST in roles
+
+    def test_required_roles_excludes_mononym_for_last(self):
+        templates = select_templates(6, required_roles={SegmentRole.LAST})
+        for t in templates:
+            roles = {s.role for s in t.segments}
+            assert SegmentRole.LAST in roles
+
+
+class TestGetTemplateByLabel:
+    def test_exact_match(self):
+        t = get_template_by_label("First Last")
+        assert t is not None
+        assert t.label == "First Last"
+
+    def test_case_insensitive(self):
+        t = get_template_by_label("first m. last")
+        assert t is not None
+        assert t.label == "First M. Last"
+
+    def test_not_found(self):
+        assert get_template_by_label("Nonexistent") is None
+
+    def test_strips_whitespace(self):
+        t = get_template_by_label("  First Last  ")
+        assert t is not None
+
+
+class TestListTemplates:
+    def test_returns_all_templates(self):
+        result = list_templates()
+        assert len(result) == len(TEMPLATES)
+
+    def test_entry_shape(self):
+        result = list_templates()
+        for label, min_l, max_l in result:
+            assert isinstance(label, str)
+            assert isinstance(min_l, int)
+            assert isinstance(max_l, int)
+            assert min_l <= max_l
 
 
 class TestFormatName:

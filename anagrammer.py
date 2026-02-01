@@ -22,6 +22,8 @@ def parse_args():
     )
     parser.add_argument(
         "phrase",
+        nargs="?",
+        default=None,
         help="Word or phrase to anagram",
     )
     parser.add_argument(
@@ -39,6 +41,30 @@ def parse_args():
         help="Training dataset: 'both' (all), 'male', or 'female'",
     )
     parser.add_argument(
+        "-t",
+        "--template",
+        default=None,
+        help="Use a specific name template (e.g., 'First Last', 'First M. Last')",
+    )
+    parser.add_argument(
+        "--first",
+        default=None,
+        help="Lock in a specific first name (its letters must be in the input phrase)",
+    )
+    parser.add_argument(
+        "--last",
+        default=None,
+        help=(
+            "Lock in a specific last name. Supports hyphenated forms:"
+            " 'Smith' (primary), 'Smith-Jones' (both), '-Jones' (second only)"
+        ),
+    )
+    parser.add_argument(
+        "--list-templates",
+        action="store_true",
+        help="List all available name templates and exit",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -54,7 +80,21 @@ def parse_args():
         action="store_true",
         help="Force Markov model rebuild, ignoring cached model",
     )
-    return parser.parse_args()
+    # Preprocess argv so values like "-Delphae" (starting with a dash) are not
+    # mistaken for flags.  Rewrite "--first <val>" / "--last <val>" to use the
+    # equals form ("--last=-Delphae") which argparse always handles correctly.
+    raw = sys.argv[1:]
+    fixed = []
+    i = 0
+    while i < len(raw):
+        if raw[i] in ("--first", "--last") and i + 1 < len(raw):
+            fixed.append(f"{raw[i]}={raw[i + 1]}")
+            i += 2
+        else:
+            fixed.append(raw[i])
+            i += 1
+
+    return parser.parse_args(fixed)
 
 
 def validate_input(phrase):
@@ -81,6 +121,34 @@ def validate_input(phrase):
     return normalized
 
 
+def validate_fixed_names(fixed_first, fixed_last, input_bag):
+    """Validate that fixed name letters are available in the input bag."""
+    combined = ""
+    if fixed_first:
+        combined += normalize(fixed_first)
+    if fixed_last:
+        # Strip hyphens before checking — hyphens are structural, not letters
+        combined += normalize(fixed_last.replace("-", ""))
+
+    if not combined:
+        return
+
+    fixed_bag = LetterBag(combined)
+    if not fixed_bag.is_subset_of(input_bag):
+        missing = fixed_bag.missing_from(input_bag)
+        names = []
+        if fixed_first:
+            names.append(f"'{fixed_first}'")
+        if fixed_last:
+            names.append(f"'{fixed_last}'")
+        print(
+            f"Error: Cannot form {' and '.join(names)} from the input letters."
+            f" Missing: {missing}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def verify_anagram(original_phrase, generated_name):
     """Verify that a generated name is a perfect anagram of the input."""
     original = LetterBag(original_phrase)
@@ -91,6 +159,20 @@ def verify_anagram(original_phrase, generated_name):
 def main():
     args = parse_args()
 
+    # Handle --list-templates
+    if args.list_templates:
+        from templates import list_templates
+
+        print("Available templates:\n")
+        for label, min_l, max_l in list_templates():
+            print(f"  {label:<30}  ({min_l}-{max_l} letters)")
+        sys.exit(0)
+
+    # Phrase is required unless --list-templates was used
+    if args.phrase is None:
+        print("Error: A phrase argument is required.", file=sys.stderr)
+        sys.exit(1)
+
     # Set random seed if provided
     if args.seed is not None:
         random.seed(args.seed)
@@ -99,16 +181,32 @@ def main():
     normalized = validate_input(args.phrase)
     bag = LetterBag(normalized)
 
+    # Validate fixed names
+    if args.first or args.last:
+        validate_fixed_names(args.first, args.last, bag)
+
     # Show input info in verbose mode
     if args.verbose:
         print(
             f'Input: "{args.phrase}" ({bag.total()} letters: {bag.as_sorted_string()})'
         )
+        if args.template:
+            print(f"Template: {args.template}")
+        if args.first:
+            print(f"Fixed first name: {args.first}")
+        if args.last:
+            print(f"Fixed last name: {args.last}")
         print()
 
     # Generate
     gen = AnagramGenerator(dataset=args.dataset, no_cache=args.no_cache)
-    results = gen.generate(args.phrase, n_results=args.count)
+    results = gen.generate(
+        args.phrase,
+        n_results=args.count,
+        template_label=args.template,
+        fixed_first=args.first,
+        fixed_last=args.last,
+    )
 
     if not results:
         print(

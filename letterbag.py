@@ -56,6 +56,22 @@ class LetterBag:
         """Return all letters as a sorted string (for display/debugging)."""
         return "".join(sorted(self._counts.elements()))
 
+    def is_subset_of(self, other):
+        """Check if every letter in this bag exists in other (with multiplicity)."""
+        for letter, count in self._counts.items():
+            if other.count(letter) < count:
+                return False
+        return True
+
+    def missing_from(self, other):
+        """Return a string of letters in self that are not available in other."""
+        missing = []
+        for letter, count in sorted(self._counts.items()):
+            deficit = count - other.count(letter)
+            if deficit > 0:
+                missing.append(letter * deficit)
+        return "".join(missing)
+
     def __eq__(self, other):
         if isinstance(other, LetterBag):
             return self._counts == other._counts

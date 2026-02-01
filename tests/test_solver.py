@@ -121,6 +121,52 @@ class TestGenerateCandidate:
         pytest.skip("Could not generate a valid candidate in 50 attempts")
 
 
+class TestGenerateCandidateWithFixedSegments:
+    def test_fixed_first_preserved(self):
+        random.seed(42)
+        model = _trained_model()
+        template = NameTemplate(
+            "First Last",
+            [
+                SegmentSpec(SegmentRole.FIRST, 3, 5),
+                SegmentSpec(SegmentRole.LAST, 3, 5),
+            ],
+        )
+        bag = LetterBag("abcdefgh")
+        fixed = {0: "abc"}
+        for seed in range(50):
+            random.seed(seed)
+            result = generate_candidate(bag, template, model, fixed_segments=fixed)
+            if result is not None:
+                assert result[0] == "abc"
+                used = "".join(result)
+                assert LetterBag(used) == bag
+                return
+        pytest.skip("Could not generate a valid candidate in 50 attempts")
+
+    def test_fixed_last_preserved(self):
+        random.seed(42)
+        model = _trained_model()
+        template = NameTemplate(
+            "First Last",
+            [
+                SegmentSpec(SegmentRole.FIRST, 3, 5),
+                SegmentSpec(SegmentRole.LAST, 3, 5),
+            ],
+        )
+        bag = LetterBag("abcdefgh")
+        fixed = {1: "efgh"}
+        for seed in range(50):
+            random.seed(seed)
+            result = generate_candidate(bag, template, model, fixed_segments=fixed)
+            if result is not None:
+                assert result[1] == "efgh"
+                used = "".join(result)
+                assert LetterBag(used) == bag
+                return
+        pytest.skip("Could not generate a valid candidate in 50 attempts")
+
+
 class TestRefineCandidate:
     def test_preserves_letters(self):
         random.seed(42)
@@ -136,3 +182,15 @@ class TestRefineCandidate:
         segments = ["hello"]
         refined = refine_candidate(segments, model)
         assert refined == ["hello"]
+
+    def test_frozen_indices_unchanged(self):
+        random.seed(42)
+        model = _trained_model()
+        segments = ["hel", "low"]
+        refined = refine_candidate(
+            segments, model, n_iterations=100, frozen_indices={0}
+        )
+        assert refined[0] == "hel"
+        original_letters = sorted("".join(segments))
+        refined_letters = sorted("".join(refined))
+        assert original_letters == refined_letters

@@ -137,12 +137,30 @@ TEMPLATES = [
 
 MIN_LETTERS_FOR_HYPHEN = 16
 
+# Lookup table for case-insensitive template label matching
+_TEMPLATE_LABELS = {t.label.lower(): t for t in TEMPLATES}
 
-def select_templates(n_letters):
+
+def get_template_by_label(label):
+    """Look up a template by its label (case-insensitive).
+
+    Returns the NameTemplate, or None if not found.
+    """
+    return _TEMPLATE_LABELS.get(label.strip().lower())
+
+
+def list_templates():
+    """Return a list of (label, min_letters, max_letters) tuples for all templates."""
+    return [(t.label, t.total_min(), t.total_max()) for t in TEMPLATES]
+
+
+def select_templates(n_letters, required_roles=None):
     """Select 3-5 templates that can accommodate the given letter count.
 
     Args:
         n_letters: total number of letters to distribute
+        required_roles: optional set of SegmentRole values that the template
+            must contain (e.g., {SegmentRole.FIRST} when --first is used)
 
     Returns:
         List of viable NameTemplate objects.
@@ -154,6 +172,11 @@ def select_templates(n_letters):
             has_hyphen = any(s.role == SegmentRole.HYPHENATED_LAST for s in t.segments)
             if has_hyphen and n_letters < MIN_LETTERS_FOR_HYPHEN:
                 continue
+            # Filter by required roles if specified
+            if required_roles:
+                template_roles = {s.role for s in t.segments}
+                if not required_roles.issubset(template_roles):
+                    continue
             viable.append(t)
 
     if not viable:
@@ -197,6 +220,30 @@ def _generate_custom_template(n_letters):
         )
 
 
+def relax_template(template, n_letters):
+    """Create a copy of a template with widened segment bounds to fit n_letters.
+
+    Used when the user explicitly requests a template that doesn't match
+    the input letter count. Returns None if physically impossible.
+    """
+    n_initials = sum(1 for s in template.segments if s.role == SegmentRole.INITIAL)
+    available = n_letters - n_initials
+    n_non_initial = len(template.segments) - n_initials
+
+    if n_non_initial == 0 or available < n_non_initial * 2:
+        return None  # physically impossible (each non-initial needs at least 2)
+
+    per_seg_max = available - (n_non_initial - 1) * 2
+    new_specs = []
+    for spec in template.segments:
+        if spec.role == SegmentRole.INITIAL:
+            new_specs.append(SegmentSpec(spec.role, 1, 1))
+        else:
+            new_specs.append(SegmentSpec(spec.role, 2, max(2, per_seg_max)))
+
+    return NameTemplate(template.label, new_specs)
+
+
 def format_name(parts, template):
     """Format raw segments into a display name.
 
@@ -223,7 +270,7 @@ def format_name(parts, template):
     return " ".join(formatted)
 
 
-def maybe_add_apostrophe(parts, template):
+def maybe_add_apostrophe(parts, template, frozen_indices=None):
     """Rarely add a cosmetic apostrophe to qualifying surnames.
 
     Only applied to surnames starting with 'o' followed by a consonant,
@@ -232,12 +279,16 @@ def maybe_add_apostrophe(parts, template):
     Args:
         parts: list of lowercase segment strings
         template: the NameTemplate used
+        frozen_indices: optional set of segment indices to skip (user-specified names)
 
     Returns:
         Modified list of segment strings (apostrophe inserted).
     """
+    frozen = frozen_indices or set()
     result = list(parts)
     for i, (seg, spec) in enumerate(zip(result, template.segments, strict=False)):
+        if i in frozen:
+            continue
         if (
             spec.role in (SegmentRole.LAST, SegmentRole.HYPHENATED_LAST)
             and len(seg) >= 4

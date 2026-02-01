@@ -2,7 +2,7 @@
 
 import random
 
-from anagrammer import verify_anagram
+from anagrammer import validate_fixed_names, verify_anagram
 from generator import AnagramGenerator
 from letterbag import LetterBag
 from util import normalize
@@ -89,3 +89,184 @@ class TestEndToEnd:
         input_bag = LetterBag(normalize("Dragon Fire"))
         for name, _score, _label, _segments in results:
             assert LetterBag(name) == input_bag
+
+
+class TestTemplateFlag:
+    """Tests for --template functionality."""
+
+    def test_template_flag_selects_template(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        results = gen.generate("Hello World", n_results=5, template_label="First Last")
+        assert len(results) > 0
+        for _name, _score, label, _segments in results:
+            assert label == "First Last"
+
+    def test_template_flag_anagram_invariant(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        phrase = "Hello World"
+        results = gen.generate(phrase, n_results=5, template_label="First Last")
+        input_bag = LetterBag(normalize(phrase))
+        for name, _score, _label, _segments in results:
+            assert LetterBag(name) == input_bag
+
+    def test_invalid_template_returns_empty(self):
+        gen = AnagramGenerator(dataset="both")
+        results = gen.generate("Hello World", template_label="Nonexistent")
+        assert results == []
+
+    def test_physically_impossible_template_returns_empty(self):
+        gen = AnagramGenerator(dataset="both")
+        # "hello" = 5 letters, "First Middle Last" needs 3 segments of 2+ = 6 minimum
+        results = gen.generate("hello", template_label="First Middle Last")
+        assert results == []
+
+    def test_template_outside_range_still_works(self):
+        """Explicit template outside designed range should warn but produce results."""
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        # 22 letters, "First Last" designed for 6-17
+        phrase = "a stitch in time saves nine"
+        results = gen.generate(phrase, n_results=5, template_label="First Last")
+        assert len(results) > 0
+        input_bag = LetterBag(normalize(phrase))
+        for name, _score, label, _segments in results:
+            assert label == "First Last"
+            assert LetterBag(name) == input_bag
+
+    def test_truly_impossible_template_returns_empty(self):
+        gen = AnagramGenerator(dataset="both")
+        # 4 letters cannot fill 3 non-initial segments (need 6+)
+        results = gen.generate("word", template_label="First Middle Last")
+        assert results == []
+
+
+class TestFixedNames:
+    """Tests for --first and --last functionality."""
+
+    def test_fixed_first_anagram_invariant(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        phrase = "pride goes before the fall"
+        results = gen.generate(phrase, n_results=5, fixed_first="Rigel")
+        assert len(results) > 0
+        input_bag = LetterBag(normalize(phrase))
+        for name, _score, _label, _segments in results:
+            assert LetterBag(name) == input_bag
+
+    def test_fixed_first_appears_in_results(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        results = gen.generate(
+            "pride goes before the fall", n_results=5, fixed_first="Rigel"
+        )
+        assert len(results) > 0
+        for _name, _score, _label, segments in results:
+            assert segments[0] == "rigel"
+
+    def test_fixed_last_appears_in_results(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        results = gen.generate("William Shakespeare", n_results=5, fixed_last="Spear")
+        assert len(results) > 0
+        for _name, _score, _label, segments in results:
+            # Last name is the last non-hyphenated LAST segment
+            assert "spear" in [s.lower() for s in segments]
+
+    def test_fixed_last_anagram_invariant(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        phrase = "William Shakespeare"
+        results = gen.generate(phrase, n_results=5, fixed_last="Spear")
+        assert len(results) > 0
+        input_bag = LetterBag(normalize(phrase))
+        for name, _score, _label, _segments in results:
+            assert LetterBag(name) == input_bag
+
+    def test_combined_first_and_last(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        phrase = "William Shakespeare"
+        results = gen.generate(
+            phrase, n_results=5, fixed_first="Eli", fixed_last="Shaw"
+        )
+        assert len(results) > 0
+        input_bag = LetterBag(normalize(phrase))
+        for name, _score, _label, segments in results:
+            assert LetterBag(name) == input_bag
+            assert segments[0] == "eli"
+
+    def test_combined_template_and_first(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        phrase = "Hello World"
+        results = gen.generate(
+            phrase,
+            n_results=5,
+            template_label="First Last",
+            fixed_first="Hello",
+        )
+        assert len(results) > 0
+        input_bag = LetterBag(normalize(phrase))
+        for name, _score, label, segments in results:
+            assert label == "First Last"
+            assert segments[0] == "hello"
+            assert LetterBag(name) == input_bag
+
+    def test_fixed_hyphenated_last(self):
+        """--last 'Smith-Jones' should fill both LAST and HYPHENATED_LAST."""
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        phrase = "the pen is mightier than the sword"
+        results = gen.generate(phrase, n_results=5, fixed_last="Prith-Towing")
+        assert len(results) > 0
+        input_bag = LetterBag(normalize(phrase))
+        for name, _score, _label, segments in results:
+            assert LetterBag(name) == input_bag
+            assert "prith" in segments
+            assert "towing" in segments
+
+    def test_fixed_hyph_last_second_position(self):
+        """--last '-Thorne' should place Thorne in the HYPHENATED_LAST slot."""
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        phrase = "the pen is mightier than the sword"
+        results = gen.generate(phrase, n_results=5, fixed_last="-Thorne")
+        assert len(results) > 0
+        input_bag = LetterBag(normalize(phrase))
+        for name, _score, _label, segments in results:
+            assert LetterBag(name) == input_bag
+            # Thorne should be in the last position (hyphenated)
+            assert "thorne" in segments
+
+    def test_fixed_last_trailing_hyphen_stripped(self):
+        """--last 'Jones-' should behave same as --last 'Jones'."""
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        phrase = "pride goes before the fall"
+        r1 = gen.generate(phrase, n_results=5, fixed_last="Beford")
+        random.seed(42)
+        r2 = gen.generate(phrase, n_results=5, fixed_last="Beford-")
+        names1 = [name for name, *_ in r1]
+        names2 = [name for name, *_ in r2]
+        assert names1 == names2
+
+
+class TestValidateFixedNames:
+    def test_valid_fixed_name_passes(self):
+        bag = LetterBag("abcdefghij")
+        # Should not raise
+        validate_fixed_names("abc", None, bag)
+
+    def test_invalid_fixed_name_exits(self):
+        import pytest
+
+        bag = LetterBag("abc")
+        with pytest.raises(SystemExit):
+            validate_fixed_names("xyz", None, bag)
+
+    def test_hyphenated_last_validates_letters_only(self):
+        bag = LetterBag("abcdefghij")
+        # Should not raise — hyphen is stripped before checking letters
+        validate_fixed_names(None, "abc-def", bag)

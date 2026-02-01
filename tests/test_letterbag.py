@@ -87,6 +87,40 @@ class TestUtilities:
         assert bag.as_sorted_string() == "abc"
 
 
+class TestSubsetAndMissing:
+    def test_subset_true(self):
+        small = LetterBag("ab")
+        big = LetterBag("abc")
+        assert small.is_subset_of(big)
+
+    def test_subset_false(self):
+        small = LetterBag("az")
+        big = LetterBag("abc")
+        assert not small.is_subset_of(big)
+
+    def test_subset_respects_multiplicity(self):
+        assert not LetterBag("aab").is_subset_of(LetterBag("ab"))
+        assert LetterBag("aab").is_subset_of(LetterBag("aab"))
+
+    def test_empty_is_subset_of_anything(self):
+        assert LetterBag("").is_subset_of(LetterBag("abc"))
+
+    def test_missing_from(self):
+        bag = LetterBag("axyz")
+        other = LetterBag("abc")
+        assert bag.missing_from(other) == "xyz"
+
+    def test_missing_from_with_multiplicity(self):
+        bag = LetterBag("aaab")
+        other = LetterBag("ab")
+        assert bag.missing_from(other) == "aa"
+
+    def test_missing_from_empty_when_subset(self):
+        bag = LetterBag("ab")
+        other = LetterBag("abc")
+        assert bag.missing_from(other) == ""
+
+
 class TestEquality:
     def test_equal_bags(self):
         assert LetterBag("abc") == LetterBag("cba")
