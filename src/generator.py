@@ -8,10 +8,11 @@ ranking.
 import os
 import sys
 
-from letterbag import LetterBag
-from markov import load_or_train
-from solver import solve
-from templates import (
+from .letterbag import LetterBag
+from .markov import load_or_train
+from .phonotactics import get_coda, get_onset
+from .solver import solve
+from .templates import (
     SegmentRole,
     format_name,
     get_template_by_label,
@@ -20,7 +21,7 @@ from templates import (
     relax_template,
     select_templates,
 )
-from util import VOWELS, normalize
+from .util import VOWELS, normalize
 
 # Words that should never appear as name segments
 BLOCKED_WORDS = frozenset(
@@ -65,35 +66,116 @@ BLOCKED_WORDS = frozenset(
 )
 
 
-# Locate the data directory relative to this file
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+# Locate the data directory relative to this file (data/ is in the project root)
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(os.path.dirname(_THIS_DIR), "data")
+
+# Common English words that should not appear as name segments (4+ letters).
+# Loaded from data/english_words.txt — one lowercase word per line.
+_ENGLISH_WORDS_PATH = os.path.join(DATA_DIR, "english_words.txt")
+
+
+def _load_english_words():
+    """Load the English word filter list from disk."""
+    if not os.path.exists(_ENGLISH_WORDS_PATH):
+        return frozenset()
+    with open(_ENGLISH_WORDS_PATH, encoding="utf-8") as f:
+        return frozenset(line.strip() for line in f if line.strip())
+
+
+ENGLISH_WORDS = _load_english_words()
 CACHE_DIR = os.path.join(DATA_DIR, ".cache")
 
 _MALE_FIRST = os.path.join(DATA_DIR, "male_first.txt")
 _FEMALE_FIRST = os.path.join(DATA_DIR, "female_first.txt")
 _SURNAMES = os.path.join(DATA_DIR, "surnames.txt")
 
-DATASET_FILES = {
+# Files used for each model type, keyed by dataset
+FIRST_NAME_FILES = {
+    "both": [_MALE_FIRST, _FEMALE_FIRST],
+    "male": [_MALE_FIRST],
+    "female": [_FEMALE_FIRST],
+}
+
+SURNAME_FILES = [_SURNAMES]
+
+COMBINED_FILES = {
     "both": [_MALE_FIRST, _FEMALE_FIRST, _SURNAMES],
     "male": [_MALE_FIRST, _SURNAMES],
     "female": [_FEMALE_FIRST, _SURNAMES],
 }
 
-CACHE_FILES = {
+# Cache paths for each model type
+FIRST_CACHE = {
+    "both": os.path.join(CACHE_DIR, "both_first_model.pkl"),
+    "male": os.path.join(CACHE_DIR, "male_first_model.pkl"),
+    "female": os.path.join(CACHE_DIR, "female_first_model.pkl"),
+}
+
+SURNAME_CACHE = os.path.join(CACHE_DIR, "surname_model.pkl")
+
+COMBINED_CACHE = {
     "both": os.path.join(CACHE_DIR, "both_model.pkl"),
     "male": os.path.join(CACHE_DIR, "male_model.pkl"),
     "female": os.path.join(CACHE_DIR, "female_model.pkl"),
 }
 
 
-def score_candidate(segments, template, model):
+BOUNDARY_WEIGHT = 0.15
+
+
+BOUNDARY_CONSONANT_PENALTY = -3.0
+
+
+def _score_boundary(seg_a, seg_b, model):
+    """Score the transition between two adjacent segments.
+
+    Evaluates how naturally the end of seg_a flows into the start of seg_b
+    by scoring boundary trigrams as if the segments were continuous text.
+    Uses the last 2 chars of seg_a as context and scores the first 2 chars
+    of seg_b against it.
+
+    Also applies a phonotactic penalty when the trailing consonant cluster
+    of seg_a combined with the leading consonant cluster of seg_b would
+    create an unpronounceable pile-up (>3 consecutive consonants across
+    the boundary).
+
+    Returns a score (higher is better).
+    """
+    # Markov transition score across the boundary
+    ctx = seg_a[-2:]
+    score = 0.0
+    for ch in seg_b[:2]:
+        padded_ctx = ctx if len(ctx) >= 2 else ("^" * (2 - len(ctx))) + ctx
+        score += model._get_log_prob(padded_ctx, ch)
+        ctx = (ctx + ch)[-2:]
+
+    # Phonotactic penalty for consonant pile-ups at the boundary
+    coda = get_coda(seg_a)
+    onset = get_onset(seg_b)
+    boundary_consonants = len(coda) + len(onset)
+    if boundary_consonants > 3:
+        score += BOUNDARY_CONSONANT_PENALTY * (boundary_consonants - 3)
+
+    return score
+
+
+def score_candidate(segments, template, models):
     """Compute a composite score for a candidate name.
 
     Higher is better. Combines Markov log-likelihood with several
     heuristic bonuses/penalties.
+
+    Args:
+        segments: list of segment strings
+        template: the NameTemplate used
+        models: list of trained MarkovModel (one per segment)
     """
     # 1. Markov log-likelihood, normalized by segment length
-    markov_score = sum(model.score_segment(seg) / max(len(seg), 1) for seg in segments)
+    markov_score = sum(
+        models[i].score_segment(seg) / max(len(seg), 1)
+        for i, seg in enumerate(segments)
+    )
 
     # 2. Length balance: penalize extreme imbalance between non-initial segments
     lengths = [len(s) for s in segments if len(s) > 1]
@@ -128,12 +210,28 @@ def score_candidate(segments, template, model):
     else:
         repetition_penalty = 0.0
 
+    # 6. Cross-boundary scoring: evaluate how naturally adjacent segments
+    # flow into each other, using the Markov model to score transitions
+    # at segment boundaries (last chars of seg N → first chars of seg N+1)
+    boundary_score = 0.0
+    n_boundaries = 0
+    for i in range(len(segments) - 1):
+        if len(segments[i]) > 1 and len(segments[i + 1]) > 1:
+            # Use the model assigned to the second segment for the transition
+            boundary_score += _score_boundary(
+                segments[i], segments[i + 1], models[i + 1]
+            )
+            n_boundaries += 1
+    if n_boundaries > 0:
+        boundary_score /= n_boundaries
+
     return (
         markov_score
         + balance_bonus
         + vowel_score
         + diversity_bonus
         + repetition_penalty
+        + BOUNDARY_WEIGHT * boundary_score
     )
 
 
@@ -236,7 +334,12 @@ class AnagramGenerator:
     """Main generator that produces name-like anagrams from input phrases."""
 
     def __init__(self, dataset="both", no_cache=False):
-        """Initialize and load/train the Markov model.
+        """Initialize and load/train the Markov models.
+
+        Loads three separate models per dataset:
+        - first_model: trained on first-name data only
+        - surname_model: trained on surname data only
+        - combined_model: trained on all data (used for middle names/mononyms)
 
         Args:
             dataset: 'both', 'male', or 'female'
@@ -244,13 +347,16 @@ class AnagramGenerator:
         """
         self.dataset = dataset
 
-        if dataset not in DATASET_FILES:
+        if dataset not in FIRST_NAME_FILES:
             raise ValueError(
                 f"Unknown dataset: {dataset}. Use 'both', 'male', or 'female'."
             )
 
-        data_files = DATASET_FILES[dataset]
-        missing = [f for f in data_files if not os.path.exists(f)]
+        # Collect all data files to check existence
+        all_files = set(
+            FIRST_NAME_FILES[dataset] + SURNAME_FILES + COMBINED_FILES[dataset]
+        )
+        missing = [f for f in all_files if not os.path.exists(f)]
         if missing:
             print("Error: Training data files not found:", file=sys.stderr)
             for f in missing:
@@ -260,8 +366,33 @@ class AnagramGenerator:
             )
             sys.exit(1)
 
-        cache_path = CACHE_FILES.get(dataset)
-        self.model = load_or_train(data_files, cache_path, force_rebuild=no_cache)
+        self.first_model = load_or_train(
+            FIRST_NAME_FILES[dataset], FIRST_CACHE[dataset], force_rebuild=no_cache
+        )
+        self.surname_model = load_or_train(
+            SURNAME_FILES, SURNAME_CACHE, force_rebuild=no_cache
+        )
+        self.combined_model = load_or_train(
+            COMBINED_FILES[dataset], COMBINED_CACHE[dataset], force_rebuild=no_cache
+        )
+
+    def _model_for_role(self, role, is_mononym=False):
+        """Return the appropriate model for a segment role."""
+        if is_mononym:
+            return self.combined_model
+        if role in (SegmentRole.FIRST,):
+            return self.first_model
+        if role in (SegmentRole.LAST, SegmentRole.HYPHENATED_LAST):
+            return self.surname_model
+        return self.combined_model
+
+    def _models_for_template(self, template):
+        """Return a list of models, one per segment in the template."""
+        is_mononym = len(template.segments) == 1
+        return [
+            self._model_for_role(spec.role, is_mononym=is_mononym)
+            for spec in template.segments
+        ]
 
     def generate(
         self,
@@ -270,6 +401,9 @@ class AnagramGenerator:
         template_label=None,
         fixed_first=None,
         fixed_last=None,
+        temp_min=None,
+        temp_max=None,
+        allow_words=False,
     ):
         """Generate name-like anagrams from a phrase.
 
@@ -279,6 +413,9 @@ class AnagramGenerator:
             template_label: optional template label to use exclusively
             fixed_first: optional fixed first name string
             fixed_last: optional fixed last name string
+            temp_min: starting sampling temperature (default: solver.TEMP_MIN)
+            temp_max: ending sampling temperature (default: solver.TEMP_MAX)
+            allow_words: if True, skip the English-word filter
 
         Returns:
             List of (formatted_name, score, template_label, segments) tuples.
@@ -464,14 +601,17 @@ class AnagramGenerator:
         for template in templates:
             fixed_map = _build_fixed_segments(template, fixed_first, fixed_last)
             frozen = set(fixed_map.keys())
+            models = self._models_for_template(template)
 
-            results = solve(
-                bag,
-                template,
-                self.model,
-                n_attempts=attempts_per_template,
-                fixed_segments=fixed_map or None,
-            )
+            solve_kwargs = {
+                "n_attempts": attempts_per_template,
+                "fixed_segments": fixed_map or None,
+            }
+            if temp_min is not None:
+                solve_kwargs["temp_min"] = temp_min
+            if temp_max is not None:
+                solve_kwargs["temp_max"] = temp_max
+            results = solve(bag, template, models, **solve_kwargs)
 
             for segments, _raw_score in results:
                 # Skip candidates containing blocked words
@@ -480,8 +620,14 @@ class AnagramGenerator:
                 if any(seg in BLOCKED_WORDS for seg in non_fixed):
                     continue
 
+                # Skip candidates with recognizable English words (4+ letters)
+                if not allow_words and any(
+                    len(seg) >= 4 and seg in ENGLISH_WORDS for seg in non_fixed
+                ):
+                    continue
+
                 # Compute composite score on clean segments (no punctuation)
-                composite = score_candidate(segments, template, self.model)
+                composite = score_candidate(segments, template, models)
 
                 # Apply cosmetic apostrophe after scoring (rare, skip frozen)
                 display_segments = maybe_add_apostrophe(

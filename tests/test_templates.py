@@ -1,6 +1,6 @@
 """Tests for templates.py - name structure templates."""
 
-from templates import (
+from src.templates import (
     TEMPLATES,
     NameTemplate,
     SegmentRole,

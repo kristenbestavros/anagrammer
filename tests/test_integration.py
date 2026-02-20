@@ -3,9 +3,9 @@
 import random
 
 from anagrammer import validate_fixed_names, verify_anagram
-from generator import AnagramGenerator
-from letterbag import LetterBag
-from util import normalize
+from src.generator import AnagramGenerator
+from src.letterbag import LetterBag
+from src.util import normalize
 
 
 class TestVerifyAnagram:
@@ -89,6 +89,41 @@ class TestEndToEnd:
         input_bag = LetterBag(normalize("Dragon Fire"))
         for name, _score, _label, _segments in results:
             assert LetterBag(name) == input_bag
+
+
+class TestTemperature:
+    """Tests for custom temperature parameters."""
+
+    def test_custom_temperature_produces_valid_anagrams(self):
+        random.seed(42)
+        gen = AnagramGenerator(dataset="both")
+        phrase = "Hello World"
+        results = gen.generate(phrase, n_results=5, temp_min=0.8, temp_max=0.8)
+        assert len(results) > 0
+        input_bag = LetterBag(normalize(phrase))
+        for name, _score, _label, _segments in results:
+            assert LetterBag(name) == input_bag
+
+    def test_constant_temperature_is_reproducible(self):
+        gen = AnagramGenerator(dataset="both")
+        random.seed(42)
+        r1 = gen.generate("Dragon Fire", n_results=3, temp_min=1.5, temp_max=1.5)
+        random.seed(42)
+        r2 = gen.generate("Dragon Fire", n_results=3, temp_min=1.5, temp_max=1.5)
+        names1 = [name for name, *_ in r1]
+        names2 = [name for name, *_ in r2]
+        assert names1 == names2
+
+    def test_default_temperature_unchanged(self):
+        """Omitting temp args should produce the same results as before."""
+        gen = AnagramGenerator(dataset="both")
+        random.seed(42)
+        r1 = gen.generate("Testing", n_results=3)
+        random.seed(42)
+        r2 = gen.generate("Testing", n_results=3, temp_min=None, temp_max=None)
+        names1 = [name for name, *_ in r1]
+        names2 = [name for name, *_ in r2]
+        assert names1 == names2
 
 
 class TestTemplateFlag:

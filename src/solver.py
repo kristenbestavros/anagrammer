@@ -9,7 +9,7 @@ Implements hybrid greedy construction with Markov guidance:
 import math
 import random
 
-from phonotactics import is_valid_segment, phonotactic_filter
+from .phonotactics import is_valid_segment, phonotactic_filter, syllabify
 
 
 def weighted_sample(candidates, temperature=1.2):
@@ -95,14 +95,14 @@ def build_segment(
     return None
 
 
-def distribute_remaining(segments, remaining_bag, specs, model, frozen_indices=None):
+def distribute_remaining(segments, remaining_bag, specs, models, frozen_indices=None):
     """Try to insert remaining letters into existing segments.
 
     Args:
         segments: list of segment strings (modified in place)
         remaining_bag: LetterBag of unused letters
         specs: list of SegmentSpec objects
-        model: trained MarkovModel
+        models: list of trained MarkovModel (one per segment)
         frozen_indices: optional set of segment indices to skip (user-specified)
 
     Returns:
@@ -126,8 +126,8 @@ def distribute_remaining(segments, remaining_bag, specs, model, frozen_indices=N
             for pos in range(len(segment) + 1):
                 new_segment = segment[:pos] + char + segment[pos:]
                 if is_valid_segment(new_segment):
-                    old_score = model.score_segment(segment)
-                    new_score = model.score_segment(new_segment)
+                    old_score = models[seg_idx].score_segment(segment)
+                    new_score = models[seg_idx].score_segment(new_segment)
                     delta = new_score - old_score
                     if delta > best_delta:
                         best_delta = delta
@@ -143,14 +143,14 @@ def distribute_remaining(segments, remaining_bag, specs, model, frozen_indices=N
 
 
 def generate_candidate(
-    letter_bag, template, model, temperature=1.2, fixed_segments=None
+    letter_bag, template, models, temperature=1.2, fixed_segments=None
 ):
     """Generate a single candidate name from a letter bag and template.
 
     Args:
         letter_bag: LetterBag with all input letters
         template: NameTemplate specifying segment structure
-        model: trained MarkovModel
+        models: list of trained MarkovModel (one per segment)
         temperature: sampling temperature (higher = more diverse)
         fixed_segments: optional dict mapping segment index to a fixed string
 
@@ -203,7 +203,11 @@ def generate_candidate(
             effective_max = needed
 
         segment = build_segment(
-            remaining, effective_min, effective_max, model, temperature=temperature
+            remaining,
+            effective_min,
+            effective_max,
+            models[idx],
+            temperature=temperature,
         )
         if segment is None:
             return None
@@ -215,19 +219,24 @@ def generate_candidate(
     # but handle edge cases), try to distribute them
     frozen = set(fixed.keys())
     if not remaining.is_empty() and not distribute_remaining(
-        segments, remaining, specs, model, frozen_indices=frozen
+        segments, remaining, specs, models, frozen_indices=frozen
     ):
         return None
 
     return segments
 
 
-def refine_candidate(segments, model, n_iterations=200, frozen_indices=None):
+def _score_with_models(segments, models):
+    """Score a complete name using per-segment models."""
+    return sum(models[i].score_segment(seg) for i, seg in enumerate(segments))
+
+
+def refine_candidate(segments, models, n_iterations=200, frozen_indices=None):
     """Hill-climbing refinement: swap letters between segments to improve score.
 
     Args:
         segments: list of segment strings
-        model: trained MarkovModel
+        models: list of trained MarkovModel (one per segment)
         n_iterations: number of swap attempts
         frozen_indices: optional set of segment indices to never modify
 
@@ -237,7 +246,7 @@ def refine_candidate(segments, model, n_iterations=200, frozen_indices=None):
     if len(segments) < 2:
         return segments
 
-    best_score = model.score_name(segments)
+    best_score = _score_with_models(segments, models)
     best_segments = list(segments)
     current = list(segments)
 
@@ -272,8 +281,88 @@ def refine_candidate(segments, model, n_iterations=200, frozen_indices=None):
         trial = list(current)
         trial[s1] = new_s1
         trial[s2] = new_s2
-        trial_score = model.score_name(trial)
+        trial_score = _score_with_models(trial, models)
 
+        if trial_score > best_score:
+            best_score = trial_score
+            best_segments = list(trial)
+            current = list(trial)
+
+    return best_segments
+
+
+def refine_syllables(segments, models, n_iterations=200, frozen_indices=None):
+    """Syllable-aware refinement: swap whole syllables between segments.
+
+    After character-level hill-climbing, this pass tries swapping entire
+    syllables between non-frozen segments to find improvements that
+    single-character swaps would miss.
+
+    Args:
+        segments: list of segment strings
+        models: list of trained MarkovModel (one per segment)
+        n_iterations: number of swap attempts
+        frozen_indices: optional set of segment indices to never modify
+
+    Returns:
+        Refined list of segment strings.
+    """
+    if len(segments) < 2:
+        return segments
+
+    frozen = frozen_indices or set()
+    swappable = [
+        i for i in range(len(segments)) if len(segments[i]) > 1 and i not in frozen
+    ]
+    if len(swappable) < 2:
+        return segments
+
+    best_score = _score_with_models(segments, models)
+    best_segments = list(segments)
+    current = list(segments)
+    original_letters = sorted("".join(segments))
+
+    for _ in range(n_iterations):
+        s1, s2 = random.sample(swappable, 2)
+
+        syls1 = syllabify(current[s1])
+        syls2 = syllabify(current[s2])
+
+        # Need at least 2 syllables in one segment to have something to swap
+        if len(syls1) < 2 and len(syls2) < 2:
+            continue
+
+        # Pick a random syllable from each
+        i1 = random.randint(0, len(syls1) - 1)
+        i2 = random.randint(0, len(syls2) - 1)
+
+        syl_a = syls1[i1]
+        syl_b = syls2[i2]
+
+        if syl_a == syl_b:
+            continue
+
+        # Build new segments by swapping syllables
+        new_syls1 = list(syls1)
+        new_syls2 = list(syls2)
+        new_syls1[i1] = syl_b
+        new_syls2[i2] = syl_a
+
+        new_s1 = "".join(new_syls1)
+        new_s2 = "".join(new_syls2)
+
+        # Verify anagram invariant is preserved
+        trial = list(current)
+        trial[s1] = new_s1
+        trial[s2] = new_s2
+        if sorted("".join(trial)) != original_letters:
+            continue
+
+        # Validate phonotactics
+        if not is_valid_segment(new_s1) or not is_valid_segment(new_s2):
+            continue
+
+        trial_score = _score_with_models(trial, models)
         if trial_score > best_score:
             best_score = trial_score
             best_segments = list(trial)
@@ -286,15 +375,25 @@ TEMP_MIN = 1.2
 TEMP_MAX = 2.0
 
 
-def solve(letter_bag, template, model, n_attempts=500, fixed_segments=None):
+def solve(
+    letter_bag,
+    template,
+    models,
+    n_attempts=500,
+    fixed_segments=None,
+    temp_min=TEMP_MIN,
+    temp_max=TEMP_MAX,
+):
     """Generate multiple candidate names for a given template.
 
     Args:
         letter_bag: LetterBag with all input letters
         template: NameTemplate specifying structure
-        model: trained MarkovModel
+        models: list of trained MarkovModel (one per segment)
         n_attempts: number of generation attempts
         fixed_segments: optional dict mapping segment index to a fixed string
+        temp_min: starting temperature for sampling (default: TEMP_MIN)
+        temp_max: ending temperature for sampling (default: TEMP_MAX)
 
     Returns:
         List of (segments, score) tuples, sorted by score descending.
@@ -306,20 +405,21 @@ def solve(letter_bag, template, model, n_attempts=500, fixed_segments=None):
     for attempt_idx in range(n_attempts):
         # Escalate temperature to encourage diversity in later attempts
         progress = attempt_idx / max(n_attempts - 1, 1)
-        temperature = TEMP_MIN + (TEMP_MAX - TEMP_MIN) * progress
+        temperature = temp_min + (temp_max - temp_min) * progress
         candidate = generate_candidate(
-            letter_bag, template, model, temperature, fixed_segments
+            letter_bag, template, models, temperature, fixed_segments
         )
         if candidate is None:
             continue
 
-        refined = refine_candidate(candidate, model, frozen_indices=frozen)
+        refined = refine_candidate(candidate, models, frozen_indices=frozen)
+        refined = refine_syllables(refined, models, frozen_indices=frozen)
         key = tuple(refined)
         if key in seen:
             continue
         seen.add(key)
 
-        score = model.score_name(refined)
+        score = _score_with_models(refined, models)
         results.append((refined, score))
 
     results.sort(key=lambda x: x[1], reverse=True)

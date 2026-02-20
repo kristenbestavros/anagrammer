@@ -5,7 +5,7 @@ based on English phonotactic patterns. Used both for final validation
 and for lookahead filtering during segment construction.
 """
 
-from util import CONSONANTS, VOWELS
+from .util import CONSONANTS, VOWELS
 
 # Valid word-initial consonant clusters (2-letter)
 VALID_ONSETS_2 = frozenset(
@@ -375,6 +375,92 @@ def is_valid_segment(segment):
 
     # No excessive vowel runs (>2 consecutive, with pair validation)
     return not _has_excessive_vowel_run(segment, max_run=2)
+
+
+def syllabify(segment):
+    """Split a name segment into syllables using onset-maximization.
+
+    Each syllable has an optional onset (consonants), a required nucleus
+    (vowel or valid vowel pair), and an optional coda (consonants).
+    When consonants appear between two nuclei, as many as possible are
+    assigned to the onset of the following syllable (provided they form
+    a valid onset cluster).
+
+    Args:
+        segment: lowercase alphabetic string
+
+    Returns:
+        List of syllable strings, or [segment] if syllabification fails.
+    """
+    if len(segment) <= 1:
+        return [segment]
+
+    # Identify nucleus positions (vowels / valid vowel pairs)
+    nuclei = []  # list of (start_index, end_index_exclusive)
+    i = 0
+    while i < len(segment):
+        if segment[i] in VOWELS:
+            start = i
+            # Extend through valid vowel pairs
+            while (
+                i + 1 < len(segment)
+                and segment[i + 1] in VOWELS
+                and segment[i : i + 2] in VALID_VOWEL_PAIRS
+            ):
+                i += 1
+            nuclei.append((start, i + 1))
+            i += 1
+        else:
+            i += 1
+
+    if not nuclei:
+        return [segment]
+
+    # Build syllables by assigning consonants around nuclei
+    syllables = []
+    for ni, (nuc_start, nuc_end) in enumerate(nuclei):
+        if ni == 0:
+            # First nucleus: everything before it is the onset
+            onset = segment[:nuc_start]
+        else:
+            # Consonants between previous nucleus end and this nucleus start
+            prev_end = nuclei[ni - 1][1]
+            consonant_cluster = segment[prev_end:nuc_start]
+
+            # Onset-maximization: give as many consonants as possible to
+            # this syllable's onset (must form a valid onset)
+            split = 0  # how many go to the previous syllable's coda
+            for k in range(len(consonant_cluster) + 1):
+                candidate_onset = consonant_cluster[k:]
+                if len(candidate_onset) == 0 or is_valid_onset(candidate_onset):
+                    split = k
+                    break
+            else:
+                # No valid onset found; give all to coda of previous syllable
+                split = len(consonant_cluster)
+
+            coda = consonant_cluster[:split]
+            onset = consonant_cluster[split:]
+
+            # Append coda to previous syllable
+            if syllables:
+                syllables[-1] += coda
+
+        nucleus = segment[nuc_start:nuc_end]
+        syllables.append(onset + nucleus)
+
+    # Append any trailing consonants as coda of the last syllable
+    if nuclei:
+        trailing = segment[nuclei[-1][1] :]
+        if syllables:
+            syllables[-1] += trailing
+
+    # Handle leading consonants with no following vowel (shouldn't happen
+    # since we checked for nuclei, but be safe)
+    if not syllables:
+        return [segment]
+
+    return syllables
 
 
 def phonotactic_filter(candidates, partial_segment, position, target_len):

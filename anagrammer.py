@@ -11,9 +11,9 @@ import argparse
 import random
 import sys
 
-from generator import AnagramGenerator
-from letterbag import LetterBag
-from util import normalize
+from src.generator import AnagramGenerator
+from src.letterbag import LetterBag
+from src.util import normalize
 
 
 def parse_args():
@@ -79,6 +79,29 @@ def parse_args():
         "--no-cache",
         action="store_true",
         help="Force Markov model rebuild, ignoring cached model",
+    )
+    parser.add_argument(
+        "--temp",
+        type=float,
+        default=None,
+        help="Set both temp-min and temp-max to a constant temperature",
+    )
+    parser.add_argument(
+        "--allow-words",
+        action="store_true",
+        help="Allow name segments that are recognizable English words",
+    )
+    parser.add_argument(
+        "--temp-min",
+        type=float,
+        default=None,
+        help="Minimum sampling temperature (default: 1.2)",
+    )
+    parser.add_argument(
+        "--temp-max",
+        type=float,
+        default=None,
+        help="Maximum sampling temperature (default: 2.0)",
     )
     # Preprocess argv so values like "-Delphae" (starting with a dash) are not
     # mistaken for flags.  Rewrite "--first <val>" / "--last <val>" to use the
@@ -161,7 +184,7 @@ def main():
 
     # Handle --list-templates
     if args.list_templates:
-        from templates import list_templates
+        from src.templates import list_templates
 
         print("Available templates:\n")
         for label, min_l, max_l in list_templates():
@@ -198,6 +221,13 @@ def main():
             print(f"Fixed last name: {args.last}")
         print()
 
+    # Resolve temperature parameters
+    temp_min = args.temp_min
+    temp_max = args.temp_max
+    if args.temp is not None:
+        temp_min = args.temp
+        temp_max = args.temp
+
     # Generate
     gen = AnagramGenerator(dataset=args.dataset, no_cache=args.no_cache)
     results = gen.generate(
@@ -206,6 +236,9 @@ def main():
         template_label=args.template,
         fixed_first=args.first,
         fixed_last=args.last,
+        temp_min=temp_min,
+        temp_max=temp_max,
+        allow_words=args.allow_words,
     )
 
     if not results:

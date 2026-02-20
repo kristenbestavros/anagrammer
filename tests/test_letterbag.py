@@ -2,7 +2,7 @@
 
 import pytest
 
-from letterbag import LetterBag
+from src.letterbag import LetterBag
 
 
 class TestConstruction:

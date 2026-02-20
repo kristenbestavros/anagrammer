@@ -1,6 +1,6 @@
 """Tests for util.py - shared helpers."""
 
-from util import CONSONANTS, VOWELS, is_consonant, is_vowel, normalize
+from src.util import CONSONANTS, VOWELS, is_consonant, is_vowel, normalize
 
 
 class TestNormalize:

@@ -4,10 +4,16 @@ import random
 
 import pytest
 
-from letterbag import LetterBag
-from markov import MarkovModel
-from solver import build_segment, generate_candidate, refine_candidate, weighted_sample
-from templates import NameTemplate, SegmentRole, SegmentSpec
+from src.letterbag import LetterBag
+from src.markov import MarkovModel
+from src.solver import (
+    build_segment,
+    generate_candidate,
+    refine_candidate,
+    refine_syllables,
+    weighted_sample,
+)
+from src.templates import NameTemplate, SegmentRole, SegmentSpec
 
 
 def _trained_model():
@@ -88,7 +94,7 @@ class TestGenerateCandidate:
             ],
         )
         bag = LetterBag("abcdefgh")
-        result = generate_candidate(bag, template, model)
+        result = generate_candidate(bag, template, [model, model])
         # May be None due to randomness, but if not None, check structure
         if result is not None:
             assert len(result) == 2
@@ -111,7 +117,7 @@ class TestGenerateCandidate:
         # Try several seeds since generation can fail
         for seed in range(50):
             random.seed(seed)
-            result = generate_candidate(bag, template, model)
+            result = generate_candidate(bag, template, [model, model])
             if result is not None:
                 used = "".join(result)
                 assert LetterBag(used) == bag
@@ -136,7 +142,9 @@ class TestGenerateCandidateWithFixedSegments:
         fixed = {0: "abc"}
         for seed in range(50):
             random.seed(seed)
-            result = generate_candidate(bag, template, model, fixed_segments=fixed)
+            result = generate_candidate(
+                bag, template, [model, model], fixed_segments=fixed
+            )
             if result is not None:
                 assert result[0] == "abc"
                 used = "".join(result)
@@ -158,7 +166,9 @@ class TestGenerateCandidateWithFixedSegments:
         fixed = {1: "efgh"}
         for seed in range(50):
             random.seed(seed)
-            result = generate_candidate(bag, template, model, fixed_segments=fixed)
+            result = generate_candidate(
+                bag, template, [model, model], fixed_segments=fixed
+            )
             if result is not None:
                 assert result[1] == "efgh"
                 used = "".join(result)
@@ -172,7 +182,7 @@ class TestRefineCandidate:
         random.seed(42)
         model = _trained_model()
         segments = ["hel", "low"]
-        refined = refine_candidate(segments, model, n_iterations=50)
+        refined = refine_candidate(segments, [model, model], n_iterations=50)
         original_letters = sorted("".join(segments))
         refined_letters = sorted("".join(refined))
         assert original_letters == refined_letters
@@ -180,7 +190,7 @@ class TestRefineCandidate:
     def test_single_segment_unchanged(self):
         model = _trained_model()
         segments = ["hello"]
-        refined = refine_candidate(segments, model)
+        refined = refine_candidate(segments, [model])
         assert refined == ["hello"]
 
     def test_frozen_indices_unchanged(self):
@@ -188,9 +198,46 @@ class TestRefineCandidate:
         model = _trained_model()
         segments = ["hel", "low"]
         refined = refine_candidate(
-            segments, model, n_iterations=100, frozen_indices={0}
+            segments, [model, model], n_iterations=100, frozen_indices={0}
         )
         assert refined[0] == "hel"
+        original_letters = sorted("".join(segments))
+        refined_letters = sorted("".join(refined))
+        assert original_letters == refined_letters
+
+
+class TestRefineSyllables:
+    def test_preserves_letters(self):
+        random.seed(42)
+        model = _trained_model()
+        segments = ["halen", "meric"]
+        refined = refine_syllables(segments, [model, model], n_iterations=100)
+        original_letters = sorted("".join(segments))
+        refined_letters = sorted("".join(refined))
+        assert original_letters == refined_letters
+
+    def test_single_segment_unchanged(self):
+        model = _trained_model()
+        segments = ["hello"]
+        refined = refine_syllables(segments, [model])
+        assert refined == ["hello"]
+
+    def test_frozen_indices_unchanged(self):
+        random.seed(42)
+        model = _trained_model()
+        segments = ["halen", "meric"]
+        refined = refine_syllables(
+            segments, [model, model], n_iterations=100, frozen_indices={0}
+        )
+        assert refined[0] == "halen"
+        original_letters = sorted("".join(segments))
+        refined_letters = sorted("".join(refined))
+        assert original_letters == refined_letters
+
+    def test_short_segments_no_crash(self):
+        model = _trained_model()
+        segments = ["ab", "cd"]
+        refined = refine_syllables(segments, [model, model], n_iterations=50)
         original_letters = sorted("".join(segments))
         refined_letters = sorted("".join(refined))
         assert original_letters == refined_letters

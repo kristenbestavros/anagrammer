@@ -1,7 +1,7 @@
 """Tests for markov.py - trigram Markov chain model."""
 
-from letterbag import LetterBag
-from markov import MarkovModel
+from src.letterbag import LetterBag
+from src.markov import MarkovModel
 
 
 def _small_model():
